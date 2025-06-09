@@ -64,26 +64,27 @@ const Login = () => {
   };
 
   useEffect(() => {
-    if(registerIsSuccess && registerData){
-      toast.success(registerData.message || "Signup successful.")
+    if (registerIsSuccess && registerData) {
+      toast.success(registerData.message || "Signup successful.");
     }
-    if(registerError){
-      toast.error(registerError.data.message || "Signup Failed");
+    if (registerError) {
+      toast.error(registerError.data?.message || "Signup Failed");
     }
-    if(loginIsSuccess && loginData){
+    if (loginIsSuccess && loginData) {
       toast.success(loginData.message || "Login successful.");
       navigate("/");
     }
-    if(loginError){ 
-      toast.error(loginError.data.message || "login Failed");
+    if (loginError) {
+      toast.error(loginError.data.message || "Login Failed");
     }
   }, [
-    loginIsLoading,
-    registerIsLoading,
-    loginData,
+    navigate,
+    registerIsSuccess,
     registerData,
-    loginError,
     registerError,
+    loginIsSuccess,
+    loginData,
+    loginError,
   ]);
 
   return (
@@ -98,7 +99,7 @@ const Login = () => {
             <CardHeader>
               <CardTitle>Signup</CardTitle>
               <CardDescription>
-                Create a new account and click signup when you're done.
+                Create a new account and click signup when you&apos;re done.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -109,7 +110,7 @@ const Login = () => {
                   name="name"
                   value={signupInput.name}
                   onChange={(e) => changeInputHandler(e, "signup")}
-                  placeholder="Eg. patel"
+                  placeholder="Eg. demo"
                   required="true"
                 />
               </div>
@@ -120,7 +121,7 @@ const Login = () => {
                   name="email"
                   value={signupInput.email}
                   onChange={(e) => changeInputHandler(e, "signup")}
-                  placeholder="Eg. patel@gmail.com"
+                  placeholder="Eg. demo@gmail.com"
                   required="true"
                 />
               </div>
@@ -158,7 +159,8 @@ const Login = () => {
             <CardHeader>
               <CardTitle>Login</CardTitle>
               <CardDescription>
-                Login your password here. After signup, you'll be logged in.
+                Login your password here. After signup, you&apos;ll be logged
+                in.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -169,7 +171,7 @@ const Login = () => {
                   name="email"
                   value={loginInput.email}
                   onChange={(e) => changeInputHandler(e, "login")}
-                  placeholder="Eg. patel@gmail.com"
+                  placeholder="Eg. demo@gmail.com"
                   required="true"
                 />
               </div>

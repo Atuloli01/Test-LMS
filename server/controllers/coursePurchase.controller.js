@@ -1,12 +1,10 @@
-import Stripe from "stripe";
 import { Course } from "../models/course.model.js";
 import { CoursePurchase } from "../models/coursePurchase.model.js";
 import { Lecture } from "../models/lecture.model.js";
 import { User } from "../models/user.model.js";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
-export const createCheckoutSession = async (req, res) => {
+// Dummy payment endpoint (simulate payment success)
+export const dummyBuyCourse = async (req, res) => {
   try {
     const userId = req.id;
     const { courseId } = req.body;
@@ -14,128 +12,53 @@ export const createCheckoutSession = async (req, res) => {
     const course = await Course.findById(courseId);
     if (!course) return res.status(404).json({ message: "Course not found!" });
 
-    // Create a new course purchase record
+    // Check if already purchased
+    const existingPurchase = await CoursePurchase.findOne({ userId, courseId });
+    if (existingPurchase?.status === "completed") {
+      return res.status(400).json({ message: "Course already purchased!" });
+    }
+
+    // Create new purchase and mark as completed
     const newPurchase = new CoursePurchase({
       courseId,
       userId,
       amount: course.coursePrice,
-      status: "pending",
+      status: "completed",
+      paymentId: `DUMMY_${Date.now()}`, // Optional dummy payment ID
     });
 
-    // Create a Stripe checkout session
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      line_items: [
-        {
-          price_data: {
-            currency: "inr",
-            product_data: {
-              name: course.courseTitle,
-              images: [course.courseThumbnail],
-            },
-            unit_amount: course.coursePrice * 100, // Amount in paise (lowest denomination)
-          },
-          quantity: 1,
-        },
-      ],
-      mode: "payment",
-      success_url: `http://localhost:5173/course-progress/${courseId}`, // once payment successful redirect to course progress page
-      cancel_url: `http://localhost:5173/course-detail/${courseId}`,
-      metadata: {
-        courseId: courseId,
-        userId: userId,
-      },
-      shipping_address_collection: {
-        allowed_countries: ["IN"], // Optionally restrict allowed countries
-      },
-    });
+    await newPurchase.save();
 
-    if (!session.url) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Error while creating session" });
+    // Make lectures visible (if required)
+    if (course.lectures.length > 0) {
+      await Lecture.updateMany(
+        { _id: { $in: course.lectures } },
+        { $set: { isPreviewFree: true } }
+      );
     }
 
-    // Save the purchase record
-    newPurchase.paymentId = session.id;
-    await newPurchase.save();
+    // Update user’s enrolledCourses
+    await User.findByIdAndUpdate(
+      userId,
+      { $addToSet: { enrolledCourses: course._id } },
+      { new: true }
+    );
+
+    // Update course’s enrolledStudents
+    await Course.findByIdAndUpdate(
+      course._id,
+      { $addToSet: { enrolledStudents: userId } },
+      { new: true }
+    );
 
     return res.status(200).json({
       success: true,
-      url: session.url, // Return the Stripe checkout URL
+      message: "Course purchased successfully (dummy payment).",
     });
   } catch (error) {
-    console.log(error);
+    console.error(error);
+    return res.status(500).json({ message: "Something went wrong." });
   }
-};
-
-export const stripeWebhook = async (req, res) => {
-  let event;
-
-  try {
-    const payloadString = JSON.stringify(req.body, null, 2);
-    const secret = process.env.WEBHOOK_ENDPOINT_SECRET;
-
-    const header = stripe.webhooks.generateTestHeaderString({
-      payload: payloadString,
-      secret,
-    });
-
-    event = stripe.webhooks.constructEvent(payloadString, header, secret);
-  } catch (error) {
-    console.error("Webhook error:", error.message);
-    return res.status(400).send(`Webhook error: ${error.message}`);
-  }
-
-  // Handle the checkout session completed event
-  if (event.type === "checkout.session.completed") {
-    console.log("check session complete is called");
-
-    try {
-      const session = event.data.object;
-
-      const purchase = await CoursePurchase.findOne({
-        paymentId: session.id,
-      }).populate({ path: "courseId" });
-
-      if (!purchase) {
-        return res.status(404).json({ message: "Purchase not found" });
-      }
-
-      if (session.amount_total) {
-        purchase.amount = session.amount_total / 100;
-      }
-      purchase.status = "completed";
-
-      // Make all lectures visible by setting `isPreviewFree` to true
-      if (purchase.courseId && purchase.courseId.lectures.length > 0) {
-        await Lecture.updateMany(
-          { _id: { $in: purchase.courseId.lectures } },
-          { $set: { isPreviewFree: true } }
-        );
-      }
-
-      await purchase.save();
-
-      // Update user's enrolledCourses
-      await User.findByIdAndUpdate(
-        purchase.userId,
-        { $addToSet: { enrolledCourses: purchase.courseId._id } }, // Add course ID to enrolledCourses
-        { new: true }
-      );
-
-      // Update course to add user ID to enrolledStudents
-      await Course.findByIdAndUpdate(
-        purchase.courseId._id,
-        { $addToSet: { enrolledStudents: purchase.userId } }, // Add user ID to enrolledStudents
-        { new: true }
-      );
-    } catch (error) {
-      console.error("Error handling event:", error);
-      return res.status(500).json({ message: "Internal Server Error" });
-    }
-  }
-  res.status(200).send();
 };
 export const getCourseDetailWithPurchaseStatus = async (req, res) => {
   try {
@@ -162,20 +85,29 @@ export const getCourseDetailWithPurchaseStatus = async (req, res) => {
   }
 };
 
-export const getAllPurchasedCourse = async (_, res) => {
+export const getAllPurchasedCourse = async (req, res) => {
   try {
+    const { userId } = req; // Extract userId from req (added by middleware like isAuthenticated)
+
     const purchasedCourse = await CoursePurchase.find({
+      userId, // Filter by the specific user ID
       status: "completed",
     }).populate("courseId");
-    if (!purchasedCourse) {
+
+    if (!purchasedCourse || purchasedCourse.length === 0) {
       return res.status(404).json({
         purchasedCourse: [],
+        message: "No purchased courses found.",
       });
     }
+
     return res.status(200).json({
       purchasedCourse,
     });
   } catch (error) {
-    console.log(error);
+    console.error(error);
+    return res.status(500).json({
+      message: "An error occurred while fetching purchased courses.",
+    });
   }
 };
